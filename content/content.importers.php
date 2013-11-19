@@ -300,10 +300,22 @@
 							$importer_result['skipped']
 						))
 					));
-
+					
 				}
 
 				$this->Form->appendChild($fieldset);
+				
+				###
+				# Delegate: XMLImporterImportPostRun
+				# Description: All Importers run successfully
+				Symphony::ExtensionManager()->notifyMembers(
+					'XMLImporterImportPostRun', '/xmlimporter/importers/run/',
+					array(
+						$importer_result['created'],
+						$importer_result['updated'],
+						$importer_result['skipped']
+					)
+				);
 			}
 		}
 

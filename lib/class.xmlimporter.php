@@ -242,7 +242,6 @@
 				$entry->set('author_id', is_null(Symphony::Engine()->Author) ? '1' : Symphony::Engine()->Author->get('id'));
 				$entry->set('modification_date_gmt', DateTimeObj::getGMT('Y-m-d H:i:s'));
 				$entry->set('modification_date', DateTimeObj::get('Y-m-d H:i:s'));
-
 				$values = array();
 
 				// Map values:
@@ -356,8 +355,11 @@
 			foreach ($entries as $index => $current) {
 				$entry = $current['entry'];
 				$values = $current['values'];
+				$date = DateTimeObj::get('Y-m-d H:i:s');
+				$dateGMT = DateTimeObj::getGMT('Y-m-d H:i:s');
 
-				$edit = !empty($existing[$index]);
+				$exists = !empty($existing[$index]);
+				$skip = ($options['can-update'] !== 'yes');
 
 				// Matches an existing entry
 				if ($edit) {
@@ -374,6 +376,25 @@
 					}
 
 					###
+					# Delegate: XMLImporterEntryPostSkip
+					# Description: Skipping an entry. Entry object is provided.
+					Symphony::ExtensionManager()->notifyMembers(
+						'XMLImporterEntryPostSkip', '/xmlimporter/importers/run/',
+						array(
+							'section'	=> $section,
+							'entry'		=> $entry,
+							'fields'	=> $values
+						)
+					);
+				}
+
+				// Edit entry
+				elseif ($exists) {
+					$entry->set('id', $existing[$index]);
+					$entry->set('modification_date', $date);
+					$entry->set('modification_date_gmt', $dateGMT);
+					
+					###
 					# Delegate: XMLImporterEntryPreEdit
 					# Description: Just prior to editing of an Entry.
 					Symphony::ExtensionManager()->notifyMembers(
@@ -386,12 +407,27 @@
 					);
 
 					EntryManager::edit($entry);
+					$entry->set('importer_status', 'updated');
+
+					###
+					# Delegate: XMLImporterEntryPostEdit
+					# Description: Editing an entry. Entry object is provided.
+					Symphony::ExtensionManager()->notifyMembers(
+						'XMLImporterEntryPostEdit', '/xmlimporter/importers/run/',
+						array(
+							'section'	=> $section,
+							'entry'		=> $entry,
+							'fields'	=> $values
+						)
+					);
 				}
 
-				// Create a new entry
+				// Create entry
 				else {
-					$entry->set('creation_date_gmt', DateTimeObj::getGMT('Y-m-d H:i:s'));
-					$entry->set('creation_date', DateTimeObj::get('Y-m-d H:i:s'));
+					$entry->set('creation_date', $date);
+					$entry->set('creation_date_gmt', $dateGMT);
+					$entry->set('modification_date', $date);
+					$entry->set('modification_date_gmt', $dateGMT);
 
 					###
 					# Delegate: XMLImporterEntryPreCreate
@@ -406,29 +442,8 @@
 					);
 
 					EntryManager::add($entry);
-				}
+					$entry->set('importer_status', 'created');
 
-				$status = $entry->get('importer_status');
-
-				if (!$status) {
-					$this->_entries[$index]['entry']->set('importer_status', 'created');
-				}
-
-				if ($edit) {
-					###
-					# Delegate: XMLImporterEntryPostEdit
-					# Description: Editing an entry. Entry object is provided.
-					Symphony::ExtensionManager()->notifyMembers(
-						'XMLImporterEntryPostEdit', '/xmlimporter/importers/run/',
-						array(
-							'section'	=> $section,
-							'entry'		=> $entry,
-							'fields'	=> $values
-						)
-					);
-				}
-
-				else {
 					###
 					# Delegate: XMLImporterEntryPostCreate
 					# Description: Creation of an Entry. New Entry object is provided.
