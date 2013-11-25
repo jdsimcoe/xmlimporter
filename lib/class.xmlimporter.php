@@ -319,8 +319,8 @@
 
 		public function commit($status) {
 			$options = $this->options();
-			$existing = array();
 			$section = SectionManager::fetch($options['section']);
+			$existing = array();
 
 			// if $status = PARTIAL_OK
 			if($status == self::__PARTIAL_OK__) {
@@ -339,26 +339,6 @@
 			// Check uniqueness
 			if ((integer)$options['unique-field'] > 0) {
 				$field = FieldManager::fetch($options['unique-field']);
-
-				if (!empty($field)) foreach ($entries as $index => $current) {
-					$entry = $current['entry'];
-
-					$data = $entry->getData($options['unique-field']);
-					$where = $joins = $group = null;
-
-					$field->buildDSRetrivalSQL($data, $joins, $where);
-
-					$group = $field->requiresSQLGrouping();
-					$existing_entries = EntryManager::fetch(null, $options['section'], 1, null, $where, $joins, $group, false, null, false);
-
-					if (is_array($existing_entries) && !empty($existing_entries)) {
-						$existing[$index] = $existing_entries[0]['id'];
-					}
-
-					else {
-						$existing[$index] = null;
-					}
-				}
 			}
 
 			foreach ($entries as $index => $current) {
@@ -367,68 +347,65 @@
 				$date = DateTimeObj::get('Y-m-d H:i:s');
 				$dateGMT = DateTimeObj::getGMT('Y-m-d H:i:s');
 
-				$exists = !empty($existing[$index]);
-				$skip = ($options['can-update'] !== 'yes');
+				// Uniqueness check (if required)
+				if(!empty($field)) {
+					$this->checkExisting($field, $entry, $index, $existing);
+				};
 
 				// Matches an existing entry
-				if ($edit) {
+				if (!is_null($existing[$index])) {
 					// Update
 					if ($options['can-update'] == 'yes') {
 						$entry->set('id', $existing[$index]);
+						$entry->set('modification_date', $date);
+						$entry->set('modification_date_gmt', $dateGMT);
+
+						###
+						# Delegate: XMLImporterEntryPreEdit
+						# Description: Just prior to editing of an Entry.
+						Symphony::ExtensionManager()->notifyMembers(
+							'XMLImporterEntryPreEdit', '/xmlimporter/importers/run/',
+							array(
+								'section'	=> $section,
+								'fields'	=> &$values,
+								'entry'		=> &$entry
+							)
+						);
+
+						EntryManager::edit($entry);
 						$entry->set('importer_status', 'updated');
+
+						###
+						# Delegate: XMLImporterEntryPostEdit
+						# Description: Editing an entry. Entry object is provided.
+						Symphony::ExtensionManager()->notifyMembers(
+							'XMLImporterEntryPostEdit', '/xmlimporter/importers/run/',
+							array(
+								'section'	=> $section,
+								'entry'		=> $entry,
+								'fields'	=> $values
+							)
+						);
 					}
 
 					// Skip
 					else {
 						$entry->set('importer_status', 'skipped');
+
+						###
+						# Delegate: XMLImporterEntryPostSkip
+						# Description: Skipping an entry. Entry object is provided.
+						Symphony::ExtensionManager()->notifyMembers(
+							'XMLImporterEntryPostSkip', '/xmlimporter/importers/run/',
+							array(
+								'section'	=> $section,
+								'entry'		=> $entry,
+								'fields'	=> $values
+							)
+						);
+
 						continue;
 					}
-
-					###
-					# Delegate: XMLImporterEntryPostSkip
-					# Description: Skipping an entry. Entry object is provided.
-					Symphony::ExtensionManager()->notifyMembers(
-						'XMLImporterEntryPostSkip', '/xmlimporter/importers/run/',
-						array(
-							'section'	=> $section,
-							'entry'		=> $entry,
-							'fields'	=> $values
-						)
-					);
-				}
-
-				// Edit entry
-				elseif ($exists) {
-					$entry->set('id', $existing[$index]);
-					$entry->set('modification_date', $date);
-					$entry->set('modification_date_gmt', $dateGMT);
-					
-					###
-					# Delegate: XMLImporterEntryPreEdit
-					# Description: Just prior to editing of an Entry.
-					Symphony::ExtensionManager()->notifyMembers(
-						'XMLImporterEntryPreEdit', '/xmlimporter/importers/run/',
-						array(
-							'section'	=> $section,
-							'fields'	=> &$values,
-							'entry'		=> &$entry
-						)
-					);
-
-					EntryManager::edit($entry);
-					$entry->set('importer_status', 'updated');
-
-					###
-					# Delegate: XMLImporterEntryPostEdit
-					# Description: Editing an entry. Entry object is provided.
-					Symphony::ExtensionManager()->notifyMembers(
-						'XMLImporterEntryPostEdit', '/xmlimporter/importers/run/',
-						array(
-							'section'	=> $section,
-							'entry'		=> $entry,
-							'fields'	=> $values
-						)
-					);
 				}
 
 				// Create entry
@@ -465,6 +442,42 @@
 						)
 					);
 				}
+			}
+		}
+		
+		/**
+		 * Given the `$field`, and the `$entry`, this function
+		 * will take the value that is about to be imported and
+		 * check to see if it's already in the system.
+		 * If it is, the `entry_id` of `$entry` will be added
+		 * to the `$existing` array.
+		 *
+		 * @param Field $field
+		 *  The unique field
+		 * @param Entry $entry
+		 *  The current entry that is about to be imported
+		 * @param integer $index
+		 *  The current position of the Entry in the import
+		 * @param array $existing
+		 *  An associative array, by reference. The key is the position of
+		 *  the entry in the import, and the value is the `entry_id` if
+		 *  a match was found, otherwise null.
+		 */
+		private function checkExisting(Field $field, Entry $entry, $index, array &$existing) {
+			$data = $entry->getData($field->get('id'));
+			$where = $joins = $group = null;
+
+			$field->buildDSRetrivalSQL($data, $joins, $where);
+
+			$group = $field->requiresSQLGrouping();
+			$existing_entries = EntryManager::fetch(null, $field->get('parent_section'), 1, null, $where, $joins, $group, false, null, false);
+
+			if (is_array($existing_entries) && !empty($existing_entries)) {
+				$existing[$index] = $existing_entries[0]['id'];
+			}
+
+			else {
+				$existing[$index] = null;
 			}
 		}
 	}
