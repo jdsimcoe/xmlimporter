@@ -1126,6 +1126,7 @@
 				Widget::TableBody($tableBody)
 			);
 			$table->setAttribute('class', 'selectable');
+			$table->setAttribute('data-interactive', 'true');
 
 			$this->Form->appendChild($table);
 
